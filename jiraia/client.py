@@ -178,4 +178,3 @@ class JiraClient:
             )
 
         return result
-
