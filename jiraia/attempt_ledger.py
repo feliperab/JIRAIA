@@ -7,6 +7,7 @@ from pathlib import Path
 from jiraia.action_engine import STORE, read_proposal
 from jiraia.execution_guard import execution_phrase
 from jiraia.executor import prepare_execution
+from jiraia.target_ledger import claim_target
 
 
 def reserve_attempt(proposal_file, jira, confirmation, store=None):
@@ -60,6 +61,10 @@ def reserve_attempt(proposal_file, jira, confirmation, store=None):
 
     if proposal["id"] != proposal_id:
         raise ValueError("Identificacao de proposta inconsistente")
+
+    # Reserva exclusiva por board + nome antes da reserva por proposta.
+    # Caso um processo falhe depois daqui, a reserva permanece: fail-closed.
+    claim_target(store, proposal_id, digest, request)
 
     ledger = store / "attempts"
     ledger.mkdir(parents=True, exist_ok=True)
