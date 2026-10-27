@@ -68,6 +68,18 @@ def execute_create_sprint_once(
             "Escrita real desabilitada por padrao"
         )
 
+    # Bloqueio temporario de producao.
+    # Clientes ficticios continuam permitidos nos testes.
+    # Nunca confundir esta verificacao com uma fronteira
+    # de seguranca contra codigo Python malicioso.
+    from jiraia.client import JiraClient
+
+    if isinstance(jira, JiraClient):
+        raise PermissionError(
+            "Cliente Jira real bloqueado nesta versao. "
+            "Escrita em producao ainda nao autorizada."
+        )
+
     store = Path(store) if store is not None else STORE
     store = store.resolve()
 
