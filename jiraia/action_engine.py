@@ -2,6 +2,7 @@ import argparse
 import hashlib
 import hmac
 import json
+import os
 import secrets
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -99,6 +100,31 @@ def read_proposal(path):
     return proposal, expected
 
 
+def record_approval(path, proposal, digest):
+    """Save an approval receipt without interactive input.
+
+    Called by approve_proposal() after terminal confirmation, or by
+    external flows (MCP elicitation, tests) that have already obtained
+    explicit human authorisation by other means.
+
+    Uses open("x") + fsync so a receipt can only be written once.
+    Returns the Path of the created receipt file.
+    """
+    receipt = {
+        "proposal_id": proposal["id"],
+        "proposal_sha256": digest,
+        "approved_at": datetime.now(timezone.utc).isoformat(),
+        "status": "APPROVED_FOR_FUTURE_REVALIDATION",
+        "executed": False,
+    }
+    receipt_path = Path(path).with_suffix(".approval.json")
+    with receipt_path.open("x", encoding="utf-8") as file:
+        json.dump(receipt, file, indent=2, ensure_ascii=False)
+        file.flush()
+        os.fsync(file.fileno())
+    return receipt_path
+
+
 def approve_proposal(path):
     path = Path(path).resolve()
 
@@ -135,19 +161,7 @@ def approve_proposal(path):
         print("[CANCELADO] Aprovacao nao concedida")
         return False
 
-    receipt = {
-        "proposal_id": proposal["id"],
-        "proposal_sha256": digest,
-        "approved_at": datetime.now(timezone.utc).isoformat(),
-        "status": "APPROVED_FOR_FUTURE_REVALIDATION",
-        "executed": False,
-    }
-
-    receipt_path = path.with_suffix(".approval.json")
-
-    with receipt_path.open("x", encoding="utf-8") as file:
-        json.dump(receipt, file, indent=2)
-
+    record_approval(path, proposal, digest)
     print("[OK] Aprovacao local registrada")
     print("[INFO] Nenhuma chamada de escrita foi realizada")
     return True
