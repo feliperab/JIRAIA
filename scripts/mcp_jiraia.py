@@ -63,5 +63,15 @@ def jiraia_sprint_planning() -> dict:
     from jiraia.planning import collect_planning_snapshot
     return collect_planning_snapshot()
 
+
+@mcp.tool()
+def jiraia_pi_planning(desired_sprints: int = 5) -> dict:
+    """
+    Diagnostica o PI, sprints futuras e backlog.
+    Somente leitura; nao altera tarefas ou sprints.
+    """
+    from jiraia.pi_planning import collect_pi_snapshot
+    return collect_pi_snapshot(desired_sprints)
+
 if __name__ == "__main__":
     mcp.run(transport="stdio")
