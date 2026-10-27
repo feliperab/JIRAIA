@@ -53,5 +53,15 @@ def jiraia_daily() -> dict:
     }
 
 
+
+@mcp.tool()
+def jiraia_sprint_planning() -> dict:
+    """
+    Consulta backlog e sprint futura para apoiar Sprint Planning.
+    Somente leitura. Nao estima capacidade nem altera o Jira.
+    """
+    from jiraia.planning import collect_planning_snapshot
+    return collect_planning_snapshot()
+
 if __name__ == "__main__":
     mcp.run(transport="stdio")
