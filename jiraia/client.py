@@ -1,3 +1,6 @@
+import urllib.parse
+import urllib.request
+import urllib.error
 import base64
 import json
 from pathlib import Path
@@ -75,3 +78,104 @@ class JiraClient:
             })
 
         return self.get(endpoint)
+
+    def post(self, endpoint, payload, *, allow_write=False):
+        """
+        POST restrito a criacao de sprint.
+        Bloqueado por padrao. O executor devera autorizar
+        explicitamente cada chamada apos validacao.
+        """
+        if allow_write is not True:
+            raise PermissionError(
+                "POST bloqueado: autorizacao de escrita ausente"
+            )
+
+        if endpoint != "/rest/agile/1.0/sprint":
+            raise ValueError("Endpoint de escrita nao permitido")
+
+        if not isinstance(payload, dict):
+            raise ValueError("Payload invalido")
+
+        if set(payload) != {"name", "originBoardId"}:
+            raise ValueError("Campos de payload nao permitidos")
+
+        name = payload["name"]
+        board_id = payload["originBoardId"]
+
+        if (
+            not isinstance(name, str)
+            or not 1 <= len(name.strip()) <= 80
+            or name != name.strip()
+            or type(board_id) is not int
+            or board_id <= 0
+        ):
+            raise ValueError("Parametros de sprint invalidos")
+
+        parsed = urllib.parse.urlparse(self.url)
+
+        if (
+            parsed.scheme != "https"
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+        ):
+            raise ValueError("URL Jira invalida para escrita")
+
+        body = json.dumps(
+            payload,
+            ensure_ascii=False,
+        ).encode("utf-8")
+
+        request = urllib.request.Request(
+            self.url.rstrip("/") + endpoint,
+            data=body,
+            headers={
+                "Authorization": f"Basic {self.auth}",
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+
+        try:
+            with urllib.request.urlopen(
+                request, timeout=20
+            ) as response:
+                status = response.status
+                raw = response.read()
+
+        except urllib.error.HTTPError as exc:
+            raise RuntimeError(
+                f"Jira rejeitou POST: HTTP {exc.code}. "
+                "Nenhum detalhe de credencial sera exibido."
+            ) from None
+
+        except urllib.error.URLError:
+            raise RuntimeError(
+                "Falha de comunicacao no POST. "
+                "Estado da operacao desconhecido; "
+                "verifique o Jira antes de repetir."
+            ) from None
+
+        if status != 201:
+            raise RuntimeError(
+                f"Resposta HTTP inesperada: {status}. "
+                "Verifique o Jira antes de repetir."
+            )
+
+        try:
+            result = json.loads(raw.decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            raise RuntimeError(
+                "Resposta invalida apos POST. "
+                "Verifique o Jira antes de repetir."
+            ) from None
+
+        if not isinstance(result, dict):
+            raise RuntimeError(
+                "Resposta inesperada apos POST. "
+                "Verifique o Jira antes de repetir."
+            )
+
+        return result
+
