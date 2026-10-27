@@ -1,0 +1,14 @@
+{
+    "mcpServers":  {
+                       "jiraia_local":  {
+                                            "args":  [
+                                                         "scripts/mcp_jiraia.py"
+                                                     ],
+                                            "command":  ".venv/Scripts/python.exe",
+                                            "autoApprove":  [
+
+                                                            ],
+                                            "disabled":  false
+                                        }
+                   }
+}
