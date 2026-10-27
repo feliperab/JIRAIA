@@ -79,6 +79,8 @@ class McpReadonlyContractTests(unittest.TestCase):
             "urlopen",
             "Request",
             "execute_create_sprint_once",
+            "execute_approved_once",
+            "_post_one_future_sprint",
             "reserve_attempt",
             "persist_once",
             "run_offline_once",
@@ -106,6 +108,7 @@ class McpReadonlyContractTests(unittest.TestCase):
             "jiraia.execution_cli",
             "jiraia.outcome_simulator",
             "jiraia.real_execution",
+            "jiraia.native_write",
         }
 
         imported = []

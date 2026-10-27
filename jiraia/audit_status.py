@@ -5,6 +5,7 @@ import json
 import re
 from collections import Counter
 from pathlib import Path
+from jiraia.target_audit import inspect_target_claims
 
 _ID = re.compile(r"[0-9a-f]{16}\Z")
 _RECON = re.compile(r"create_sprint-board_([1-9][0-9]*)-sprint_([1-9][0-9]*)\.json\Z")
@@ -82,6 +83,7 @@ def inspect_local(store):
     attempts = _records(store / "attempts")
     dispatches = _records(store / "real_dispatch")
     outcomes = _records(store / "real_outcomes")
+    target_claims = inspect_target_claims(store, attempts)
     items = []
     for identifier in sorted(attempts.keys() | dispatches.keys() | outcomes.keys()):
         attempt = attempts.get(identifier)
@@ -137,6 +139,8 @@ def inspect_local(store):
         "warning": "Not Jira verification; not approval to execute or retry.",
         "attempts": items,
         "reconciliations": reconciliation_items,
+        "target_claims": target_claims,
+        "target_claim_counts": dict(sorted(Counter(item["status"] for item in target_claims).items())),
         "counts": dict(sorted(Counter(item["status"] for item in items).items())),
     }
 
