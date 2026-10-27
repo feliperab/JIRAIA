@@ -5,9 +5,9 @@ import json
 import secrets
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from urllib.parse import urlencode
 
 from jiraia.client import JiraClient
+from jiraia.sprint_inventory import list_sprint_names
 
 ROOT = Path(__file__).resolve().parents[1]
 STORE = ROOT / ".jiraia" / "proposals"
@@ -34,29 +34,14 @@ def build_create_sprint(jira, board_id, name):
 
     board = jira.get(f"/rest/agile/1.0/board/{board_id}")
 
-    query = urlencode({
-        "state": "active,future",
-        "maxResults": 50,
-    })
-
-    existing = jira.get(
-        f"/rest/agile/1.0/board/{board_id}/sprint?{query}"
-    )
-
-    if existing.get("isLast") is not True:
-        raise RuntimeError(
-            "Lista de sprints nao confirmada como completa"
-        )
-
-    existing_names = [
-        s.get("name", "") for s in existing.get("values", [])
-    ]
-
-    if any(n.casefold() == name.casefold() for n in existing_names):
+    existing_names = list_sprint_names(jira, board_id)
+    if any(
+        existing.strip().casefold() == name.casefold()
+        for existing in existing_names
+    ):
         raise ValueError(
-            f"Ja existe uma sprint ativa ou futura chamada {name}"
+            f"Ja existe uma sprint chamada {name}"
         )
-
     return {
         "schema_version": 1,
         "id": secrets.token_hex(8),
