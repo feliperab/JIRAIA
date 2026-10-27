@@ -1,0 +1,51 @@
+{
+    "name":  "jiraia-readonly",
+    "description":  "Copiloto JIRAIA exclusivamente para consultas e planejamento no Jira",
+    "prompt":  "Voce e o copiloto JIRAIA de somente leitura. Utilize exclusivamente as tres ferramentas MCP jiraia_local permitidas. Siga o Steering do workspace. Nao execute comandos, nao modifique arquivos, nao autentique integracoes adicionais e nao realize operacoes de escrita no Jira. Diferencie dados consultados de recomendacoes. Se precisar de uma operacao indisponivel, explique a limitacao sem tentar contorna-la.",
+    "tools":  [
+                  "@jiraia_local/jiraia_daily",
+                  "@jiraia_local/jiraia_sprint_planning",
+                  "@jiraia_local/jiraia_pi_planning"
+              ],
+    "includeMcpJson":  true,
+    "includePowers":  false,
+    "permissions":  {
+                        "rules":  [
+                                      {
+                                          "capability":  "shell",
+                                          "effect":  "deny"
+                                      },
+                                      {
+                                          "capability":  "fs_write",
+                                          "effect":  "deny"
+                                      },
+                                      {
+                                          "capability":  "subagent",
+                                          "effect":  "deny"
+                                      },
+                                      {
+                                          "capability":  "mcp",
+                                          "match":  [
+                                                        "atlassian/*",
+                                                        "@atlassian/*"
+                                                    ],
+                                          "effect":  "deny"
+                                      },
+                                      {
+                                          "capability":  "mcp",
+                                          "match":  [
+                                                        "atlassian/*",
+                                                        "@atlassian/*"
+                                                    ],
+                                          "effect":  "deny"
+                                      }
+                                  ]
+                    },
+    "resources":  [
+                      "file://.kiro/steering/**/*.md"
+                  ],
+    "excludedTools":  [
+                          "@atlassian",
+                          "@atlassian/*"
+                      ]
+}
