@@ -9,6 +9,19 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode
 
 
+def _require_write_transport_activation():
+    """
+    Transporte POST desabilitado nesta versao.
+
+    Nao existe chave booleana ou variavel de ambiente
+    que autorize acesso real a rede por este caminho.
+    """
+    raise PermissionError(
+        "Transporte HTTP de escrita desabilitado. "
+        "Autorizacao de producao ainda nao implementada."
+    )
+
+
 class JiraClient:
     def __init__(self, url, email, token):
         self.url = url.rstrip("/")
@@ -120,6 +133,8 @@ class JiraClient:
             or parsed.password is not None
         ):
             raise ValueError("URL Jira invalida para escrita")
+
+        _require_write_transport_activation()
 
         body = json.dumps(
             payload,

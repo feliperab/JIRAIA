@@ -60,6 +60,7 @@ class JiraPostTests(unittest.TestCase):
         urlopen.assert_not_called()
 
     @patch("urllib.request.urlopen")
+    @patch("jiraia.client._require_write_transport_activation", lambda: None)
     def test_simulated_post(self, urlopen):
         response = MagicMock()
         response.status = 201
@@ -100,6 +101,7 @@ class JiraPostTests(unittest.TestCase):
         )
 
     @patch("urllib.request.urlopen")
+    @patch("jiraia.client._require_write_transport_activation", lambda: None)
     def test_http_error_hides_body(self, urlopen):
         urlopen.side_effect = urllib.error.HTTPError(
             "https://example.invalid",
