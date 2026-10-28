@@ -8,7 +8,6 @@ from urllib.parse import parse_qs, urlsplit
 from jiraia.attempt_ledger import reserve_attempt
 from jiraia.execution_guard import execution_phrase
 from jiraia.executor import prepare_execution
-from jiraia.real_execution import execute_create_sprint_once
 from test_executor import FakeJira, create_fixture
 
 
@@ -154,7 +153,7 @@ class WriteGuardIntegrationTests(unittest.TestCase):
             )
             self.assertEqual(jira.post_calls, 0)
 
-    def test_closed_duplicate_blocks_executor(self):
+    def test_closed_duplicate_blocks_reservation(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = create_fixture(tmp)
 
@@ -171,11 +170,10 @@ class WriteGuardIntegrationTests(unittest.TestCase):
             with self.assertRaisesRegex(
                 ValueError, "Ja existe"
             ):
-                execute_create_sprint_once(
+                reserve_attempt(
                     path,
                     jira,
                     confirmation(path),
-                    enable_real_write=True,
                     store=tmp,
                 )
 

@@ -8,6 +8,8 @@ No retries, including on ambiguous POST outcomes.
 import argparse
 import hmac
 import json
+import os
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -17,14 +19,74 @@ from urllib.request import Request, urlopen
 from jiraia.action_engine import STORE, read_proposal
 from jiraia.attempt_ledger import reserve_attempt
 from jiraia.client import JiraClient
-from jiraia.execution_cli import select_proposal
 from jiraia.execution_guard import execution_phrase
 from jiraia.executor import prepare_execution
-from jiraia.real_execution import matches_sprint, persist_once
 
 
 ENDPOINT = "/rest/agile/1.0/sprint"
 SITE = "https://jiraia.atlassian.net"
+
+
+def persist_once(store, folder_name, proposal_id, record):
+    folder = Path(store).resolve() / folder_name
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / f"{proposal_id}.json"
+
+    try:
+        with path.open("x", encoding="utf-8") as file:
+            json.dump(record, file, indent=2, ensure_ascii=False)
+            file.flush()
+            os.fsync(file.fileno())
+    except FileExistsError:
+        raise ValueError(
+            "Registro ja existe. Repeticao bloqueada."
+        ) from None
+
+    return path
+
+
+def matches_sprint(data, sprint_id, payload):
+    return (
+        isinstance(data, dict)
+        and type(data.get("id")) is int
+        and data["id"] == sprint_id
+        and data.get("name") == payload["name"]
+        and data.get("originBoardId") == payload["originBoardId"]
+        and data.get("state") == "future"
+    )
+
+
+def select_proposal(filename=None, store=None):
+    store = Path(store) if store is not None else STORE
+    store = store.resolve()
+
+    if filename is None:
+        candidates = [
+            p for p in store.glob("*.json")
+            if re.fullmatch(r"[0-9a-f]{16}\.json", p.name)
+            and p.is_file()
+        ]
+
+        if not candidates:
+            raise ValueError("Nenhuma proposta local encontrada")
+
+        path = max(
+            candidates,
+            key=lambda p: (p.stat().st_mtime_ns, p.name),
+        ).resolve()
+    else:
+        path = Path(filename).resolve()
+
+    if path.parent != store:
+        raise ValueError("Proposta fora do diretorio autorizado")
+
+    if not re.fullmatch(r"[0-9a-f]{16}\.json", path.name):
+        raise ValueError("Nome de proposta invalido")
+
+    if not path.is_file():
+        raise ValueError("Arquivo de proposta nao encontrado")
+
+    return path
 
 
 def _require_site(jira):

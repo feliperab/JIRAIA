@@ -18,10 +18,6 @@ inclusion: always
 - `jiraia/action_engine.py`: propostas e aprovacoes.
 - `jiraia/executor.py`: revalidacao de propostas.
 - `jiraia/attempt_ledger.py`: reserva persistente de tentativas.
-- `jiraia/execution_pipeline.py`: simulacao offline do fluxo.
-- `jiraia/outcome_simulator.py`: resultados ficticios.
-- `jiraia/real_execution.py`: executor com producao bloqueada.
-- `jiraia/execution_cli.py`: visualizacao e preflight de leitura.
 - `jiraia/client.py`: cliente HTTP, incluindo bloqueio de POST real.
 
 ## Integracao MCP
@@ -32,4 +28,23 @@ O servidor `scripts/mcp_jiraia.py` expoe somente:
 - `jiraia_sprint_planning`
 - `jiraia_pi_planning`
 
-Nao adicionar ferramentas de escrita ao MCP sem revisao de seguranca e autorizacao humana especifica.
+## Servidores MCP operacionais
+
+- `scripts/mcp_jiraia.py`: consultas e planejamento, somente leitura.
+- `scripts/mcp_jiraia_ops.py`: operacoes Jira e CRUD de issues.
+- `scripts/mcp_jiraia_write.py`: criacao controlada de sprint.
+- `jiraia/native_write.py`: caminho nativo de escrita controlada.
+- `jiraia/execution_guard.py`: protecoes de execucao.
+- `jiraia/attempt_ledger.py`: controle persistente de tentativas.
+
+O servidor de leitura nao deve adquirir permissoes de escrita.
+
+As ferramentas operacionais exigem autorizacao humana,
+validacao de estado e rastreabilidade de operacoes.
+
+As 12 ferramentas CRUD de Epicos, Stories e Subtarefas
+estao disponiveis. A exclusao real ainda requer homologacao
+funcional completa.
+
+Nao introduzir caminhos de escrita que contornem
+confirmacao humana, auditoria ou controle de tentativas.

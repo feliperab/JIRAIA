@@ -389,7 +389,6 @@ JIRAIA/
 │   ├── executor.py
 │   ├── native_write.py
 │   ├── attempt_ledger.py
-│   └── execution_cli.py
 ├── scripts/
 │   ├── mcp_jiraia.py
 │   ├── mcp_jiraia_write.py
