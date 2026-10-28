@@ -1,205 +1,418 @@
 # JIRAIA
 
-**Copiloto de planejamento e acompanhamento do Jira Cloud integrado ao Kiro CLI V3 por MCP.**
+**Assistente de gestao agil integrado ao Jira Cloud pelo Kiro CLI V3, utilizando Model Context Protocol (MCP).**
 
-O JIRAIA transforma dados de sprints e backlog em diagnósticos para reuniões de **Daily**, **Sprint Planning** e **PI Planning**. O projeto também inclui um *Action Engine* experimental para gerar propostas, verificar aprovações locais e simular operações com rastreabilidade.
+O JIRAIA permite consultar, planejar e executar operacoes no Jira por linguagem natural, utilizando um unico agente chamado `jiraia`.
 
-> [!IMPORTANT]
-> **O JIRAIA não executa alterações reais no Jira nesta versão.** A interface de execução, o executor com cliente real e o transporte HTTP de escrita permanecem bloqueados. Aprovações locais e simulações não representam autorização para uma escrita de produção.
+O usuario nao precisa executar comandos Python, preparar payloads REST ou alternar entre agentes para as tarefas operacionais.
+
+## Estado atual
+
+O projeto possui funcionalidades de leitura e escrita reais no Jira Cloud.
+
+As operacoes de escrita sao limitadas ao escopo autorizado e exigem confirmacao humana pela interface MCP do Kiro.
+
+**Ambiente configurado:**
+
+- Jira Cloud: `https://jiraia.atlassian.net`
+- Projeto: `SCRUM`
+- Scrum board: `1`
+- Interface: Kiro CLI V3
+- Linguagem: Python 3.13
+- Protocolo: MCP / FastMCP
+
+A disponibilidade efetiva de cada ferramenta depende da configuracao MCP local, das permissoes do agente e das permissoes da conta Jira.
 
 ## Funcionalidades
 
-| Recurso | Objetivo | Comportamento atual |
+### Daily
+
+A ferramenta `jiraia_daily` consulta a sprint ativa e apresenta:
+
+- Issues em andamento e pendentes.
+- Responsaveis.
+- Possiveis impedimentos.
+- Pontos de atencao.
+- Proximas acoes recomendadas.
+
+Somente leitura.
+
+### Sprint Planning
+
+A ferramenta `jiraia_sprint_planning` consulta:
+
+- Sprint atual e sprints futuras.
+- Backlog.
+- Story Points.
+- Candidatos ao planejamento.
+- Riscos de capacidade e dependencia.
+
+Somente leitura.
+
+### PI Planning
+
+A ferramenta `jiraia_pi_planning` analisa:
+
+- Horizonte de sprints.
+- Sprints existentes e ausentes.
+- Backlog disponivel.
+- Alocacao de trabalho.
+- Riscos e lacunas de planejamento.
+
+Somente leitura.
+
+### Gestao de issues
+
+O servidor `jiraia_ops` disponibiliza operacoes para:
+
+- Buscar issues por filtros JQL.
+- Consultar detalhes de uma issue.
+- Consultar tipos de issues.
+- Buscar usuarios atribuiveis.
+- Listar transicoes de status.
+- Criar issues.
+- Editar resumo, descricao e Story Points.
+- Definir prioridade.
+- Atribuir ou remover responsaveis.
+- Transicionar status.
+- Comentar issues.
+
+As escritas exigem confirmacao humana.
+
+### Gestao de sprints
+
+O JIRAIA permite:
+
+- Criar sprints futuras.
+- Criar sprint futura e alocar issues em uma unica solicitacao.
+- Alocar issues em uma sprint futura.
+- Atualizar nome, goal e datas de uma sprint futura.
+
+As ferramentas de escrita do servidor `jiraia_ops` operam no projeto SCRUM e no board 1.
+
+O sistema nao inicia nem exclui sprints automaticamente.
+
+## Um unico agente no Kiro
+
+O agente principal e:
+
+`jiraia`
+
+Sua funcao e receber pedidos em linguagem natural e utilizar a ferramenta MCP apropriada.
+
+Exemplos:
+
+> JIRAIA, faca minha Daily.
+
+> JIRAIA, analise o backlog para a proxima sprint.
+
+> JIRAIA, prepare o PI Planning para cinco sprints.
+
+> JIRAIA, mostre os detalhes da SCRUM-3.
+
+> JIRAIA, crie a Sprint 4 e coloque SCRUM-3 nela.
+
+> JIRAIA, atualize os Story Points da SCRUM-3 para 5.
+
+> JIRAIA, altere o status da SCRUM-3 para Concluido.
+
+As operacoes de escrita so prosseguem mediante aprovacao humana.
+
+A configuracao do agente fica em `.kiro/agents/jiraia.json`.
+
+A lista de ferramentas do agente deve incluir as ferramentas dos servidores MCP utilizados. Confira a lista efetivamente carregada com `/tools`.
+
+## Aprovacao humana
+
+As ferramentas de escrita do servidor `jiraia_ops` utilizam MCP elicitation para apresentar um formulario de confirmacao diretamente ao usuario.
+
+Exemplo de interacao:
+
+```text
+Usuario:
+JIRAIA, crie a Sprint 4 e coloque SCRUM-3 nela.
+
+JIRAIA:
+Alteracoes propostas:
+
+1. Criar sprint futura "Sprint 4" no board 1.
+2. Alocar SCRUM-3 na nova sprint.
+
+As operacoes sao sequenciais e nao atomicas.
+
+Autoriza?
+
+Usuario:
+SIM
+
+JIRAIA:
+Executa as operacoes autorizadas.
+Verifica os resultados.
+Retorna o status e os registros de auditoria.
+```
+
+Respostas aceitas no formulario:
+
+- `SIM`: autoriza.
+- `OK`: autoriza.
+- `NAO`: cancela.
+- `Decline` ou cancelamento do formulario: cancela.
+
+O servidor valida a resposta recebida por MCP. A aprovacao nao deve ser fornecida como argumento de ferramenta gerado pelo modelo.
+
+Consultas de leitura nao precisam de aprovacao de escrita.
+
+O servidor historico `jiraia_write` utiliza outro fluxo, com duas confirmacoes e frases especificas. Para a experiencia simplificada Sim/OK/Nao, utilize as ferramentas de `jiraia_ops`.
+
+## Operacoes compostas
+
+A ferramenta `jiraia_criar_sprint_com_issues` permite solicitar a criacao de uma sprint e a alocacao de ate 20 issues em uma unica interacao.
+
+O fluxo:
+
+1. Consulta e valida o estado atual do Jira.
+2. Prepara a proposta.
+3. Exibe uma confirmacao humana para o conjunto.
+4. Revalida os dados.
+5. Cria a sprint futura.
+6. Verifica a criacao.
+7. Aloca as issues.
+8. Verifica a alocacao.
+9. Retorna o resultado auditado.
+
+**Importante:** o Jira nao oferece uma transacao atomica para esse conjunto. A sprint pode ser criada mesmo que a alocacao posterior falhe.
+
+Nesses casos, o JIRAIA deve informar sucesso parcial ou estado incerto, sem repetir automaticamente a escrita.
+
+## Resultados de execucao
+
+Principais status retornados pelas ferramentas:
+
+| Status | Significado |
+| --- | --- |
+| `SUCCESS_VERIFIED` | Resultado confirmado pela verificacao posterior |
+| `CANCELADO_SEM_POST` | Usuario nao autorizou a escrita |
+| `DADOS_ALTERADOS_SEM_POST` | Dados mudaram antes do envio |
+| `OPERACAO_JA_RESERVADA` | Tentativa duplicada bloqueada |
+| `UNKNOWN_NEEDS_RECONCILIATION` | Resultado incerto; requer verificacao |
+| `PARTIAL_SUCCESS_REVIEW_REQUIRED` | Operacao composta parcialmente concluida |
+
+Um resultado incerto nao autoriza nova tentativa automatica.
+
+A auditoria local fica em `.jiraia/`, incluindo registros das operacoes do servidor `jiraia_ops`.
+
+Esses arquivos nao devem ser versionados.
+
+## Arquitetura MCP
+
+O projeto possui tres servidores principais:
+
+| Servidor | Arquivo | Funcao |
 | --- | --- | --- |
-| Daily Copilot | Diagnóstico da sprint ativa | Consulta, sem escrita |
-| Sprint Planning | Análise de backlog e sprint futura | Consulta, sem escrita |
-| PI Planning | Visão de planejamento entre sprints | Consulta, sem escrita |
-| Action Engine | Preparação, integridade e aprovação local de propostas | Preview e simulação |
-| Execution CLI | Exibição de propostas e verificações antes de executar | Execução real desabilitada |
-| Kiro Steering | Contexto persistente de produto, arquitetura e segurança | Ativo no Kiro CLI V3 |
+| `jiraia_local` | `scripts/mcp_jiraia.py` | Daily, Sprint Planning, PI Planning |
+| `jiraia_write` | `scripts/mcp_jiraia_write.py` | Escrita historica controlada, com dupla confirmacao |
+| `jiraia_ops` | `scripts/mcp_jiraia_ops.py` | Consultas e escritas com formulario Sim/OK/Nao |
 
-### Ferramentas MCP
+A separacao entre servidores preserva os contratos de seguranca e permite ao agente principal utilizar ferramentas especificas.
 
-O servidor local `jiraia_local` expõe três ferramentas:
+### Ferramentas do jiraia_ops
 
-- `jiraia_daily` — consulta a sprint ativa para apoiar a Daily.
-- `jiraia_sprint_planning` — consulta backlog e sprint futura para apoiar o Sprint Planning.
-- `jiraia_pi_planning` — consulta sprints futuras e backlog para apoiar o PI Planning.
+Consultas:
 
-As ferramentas do MCP foram concebidas como operações de **somente leitura**. O Kiro também pode ter ferramentas nativas, como `shell` e `write`; elas possuem permissões próprias e não são automaticamente limitadas pela política do servidor MCP.
+- `jiraia_buscar_issues`
+- `jiraia_detalhar_issue`
+- `jiraia_listar_transicoes`
+- `jiraia_tipos_issue`
+- `jiraia_buscar_usuarios`
 
-## Tecnologias
+Escritas:
 
-- Python 3.13 e ambiente virtual `.venv`
-- Windows e PowerShell 5.1 no ambiente de desenvolvimento
-- Jira Cloud REST API
-- Model Context Protocol (MCP) e FastMCP
-- Kiro CLI V3 e arquivos de Steering
-- `unittest` para testes automatizados
+- `jiraia_criar_sprint`
+- `jiraia_criar_sprint_com_issues`
+- `jiraia_criar_issue`
+- `jiraia_editar_issue`
+- `jiraia_definir_prioridade`
+- `jiraia_atribuir_issue`
+- `jiraia_transicionar_issue`
+- `jiraia_alocar_issues`
+- `jiraia_comentar_issue`
+- `jiraia_atualizar_sprint`
 
-## Instalação
+## Instalacao
 
-### 1. Pré-requisitos
+### Requisitos
 
-Instale **Git**, **Python 3.13** e **Kiro CLI**, e tenha acesso ao seu projeto no Jira Cloud com credenciais de leitura apropriadas.
+- Windows com PowerShell.
+- Git.
+- Python 3.13.
+- Kiro CLI V3.
+- Conta Jira Cloud com permissoes apropriadas.
 
-### 2. Clonar o repositório
+### Clonar
 
 ```powershell
 git clone https://github.com/feliperab/JIRAIA.git
 cd JIRAIA
 ```
 
-### 3. Instalar as dependências
-
-No PowerShell:
+### Preparar Python
 
 ```powershell
 py -3.13 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-Use sempre o Python do ambiente virtual nos comandos abaixo.
+### Configurar Jira
 
-### 4. Configurar credenciais do Jira
-
-Copie o exemplo de configuração e preencha os valores **somente no arquivo local**:
+Crie `.env` a partir do exemplo:
 
 ```powershell
 Copy-Item .env.example .env
-notepad .env
 ```
 
-Configure a URL do seu tenant, seu e-mail e o token de API segundo os nomes e comentários indicados em `.env.example`. **Não cole credenciais em issues, commits, logs ou mensagens.**
+Variaveis:
 
-O arquivo `.env` e a configuração privada de MCP estão previstos no `.gitignore`. Confira as regras antes de adicionar novos arquivos ao Git.
+```text
+JIRA_URL=https://jiraia.atlassian.net
+JIRA_EMAIL=seu-email@exemplo.com
+JIRA_API_TOKEN=seu-token
+```
 
-## Integração com o Kiro CLI V3
+**Nunca versionar `.env` nem compartilhar tokens.**
 
-O servidor MCP Python está em `scripts/mcp_jiraia.py` e é utilizado pelo Kiro por `stdio`. A configuração fica no arquivo MCP local do Kiro (por exemplo, `.kiro/settings/mcp.json` no projeto, conforme a instalação).
+### Registrar os servidores MCP
 
-Um exemplo de entrada para **adicionar** ao objeto `mcpServers`, adaptando o caminho à sua máquina:
+Configure os servidores no arquivo local `.kiro/settings/mcp.json`.
+
+Exemplo de estrutura, substituindo `C:/CAMINHO/JIRAIA` pelo caminho real:
 
 ```json
 {
-  "jiraia_local": {
-    "command": "C:/CAMINHO/JIRAIA/.venv/Scripts/python.exe",
-    "args": ["C:/CAMINHO/JIRAIA/scripts/mcp_jiraia.py"]
+  "mcpServers": {
+    "jiraia_local": {
+      "command": "C:/CAMINHO/JIRAIA/.venv/Scripts/python.exe",
+      "args": ["C:/CAMINHO/JIRAIA/scripts/mcp_jiraia.py"]
+    },
+    "jiraia_write": {
+      "command": "C:/CAMINHO/JIRAIA/.venv/Scripts/python.exe",
+      "args": ["C:/CAMINHO/JIRAIA/scripts/mcp_jiraia_write.py"]
+    },
+    "jiraia_ops": {
+      "command": "C:/CAMINHO/JIRAIA/.venv/Scripts/python.exe",
+      "args": ["C:/CAMINHO/JIRAIA/scripts/mcp_jiraia_ops.py"]
+    }
   }
 }
 ```
 
-> Esse trecho é uma **entrada de `mcpServers`**, não o conteúdo completo do arquivo `mcp.json`. Preserve outros servidores e configurações já existentes. Não versionar arquivos MCP contendo informações privadas.
+Se o arquivo MCP ja existir, adicione apenas as entradas ausentes. Preserve as configuracoes e credenciais existentes.
 
-Abra uma sessão na pasta do projeto:
+O exemplo acima nao substitui automaticamente a allowlist do agente.
+
+Para utilizar todas as funcionalidades em uma unica conversa, inclua as ferramentas de `jiraia_ops` na lista `tools` do agente `jiraia` e mantenha permissoes restritas para escrita.
+
+A configuracao efetivamente carregada no Kiro deve ser conferida com `/tools`. Nao presuma que uma ferramenta esta disponivel apenas porque seu servidor existe no repositorio.
+
+### Iniciar o Kiro
+
+Na raiz do projeto:
 
 ```powershell
-kiro-cli chat --v3
+kiro-cli
 ```
 
 Dentro do Kiro:
 
-- `/mcp` — verifique se `jiraia_local` está ativo e disponibiliza as três ferramentas.
-- `/tools` — confira as ferramentas e permissões disponíveis na sessão.
-- `/context` — confira os arquivos Steering incluídos no contexto.
-
-Exemplos de solicitações:
-
-> Use `jiraia_daily` para resumir a sprint ativa, identificar bloqueios e sugerir a pauta da Daily.
-
-> Use `jiraia_sprint_planning` para analisar o backlog e os pontos de atenção da próxima sprint.
-
-> Use `jiraia_pi_planning` para preparar uma visão de planejamento do PI com base nos dados disponíveis.
-
-As respostas dependem do estado real do Jira, das permissões da conta e das informações presentes no board.
-
-## Steering do Kiro
-
-O contexto persistente fica em `.kiro/steering/`:
-
-| Arquivo | Propósito |
-| --- | --- |
-| `product.md` | Visão do produto e objetivos do JIRAIA |
-| `tech.md` | Tecnologias e convenções de desenvolvimento |
-| `structure.md` | Estrutura do projeto e contratos MCP |
-| `jira-safety.md` | Política de leitura, escrita e aprovação humana |
-
-O carregamento desses quatro documentos foi validado no Kiro CLI V3. **Steering orienta o agente; não substitui controles técnicos de acesso e autorização.**
-
-## Action Engine e execução segura
-
-Os módulos de `jiraia/` contemplam geração de propostas, verificações de integridade, recibos locais de aprovação, reserva de tentativas e simulação de resultados. Arquivos de trabalho gerados localmente permanecem em `.jiraia/`, que não deve ser enviado ao Git.
-
-Para visualizar uma proposta local existente:
-
-```powershell
-.\.venv\Scripts\python.exe -m jiraia.execution_cli
+```text
+/agent
 ```
 
-Para acrescentar verificações de **leitura** no Jira:
+Selecione `jiraia`.
 
-```powershell
-.\.venv\Scripts\python.exe -m jiraia.execution_cli --check-jira
+Depois confira:
+
+```text
+/mcp
+/tools
 ```
 
-A execução real **não** é habilitada por `--execute` ou `allow_write=True`. O aplicativo possui bloqueios adicionais no executor e no cliente HTTP para impedir envios acidentais pelo caminho implementado. Não tente contornar essas proteções.
+O uso operacional deve ocorrer pela conversa com o agente `jiraia`.
 
-Uma versão futura com escrita exigirá autorização humana específica para a operação, revalidação do estado do Jira, prevenção de duplicidades, registro de tentativas e reconciliação de respostas incertas **antes** de qualquer POST real.
+## Seguranca
+
+Principais controles tecnicos:
+
+- Instancia Jira autorizada explicitamente.
+- Operacoes limitadas ao projeto SCRUM e ao board 1, conforme a ferramenta.
+- Validacao de chaves, parametros e endpoints.
+- Confirmacao humana via MCP antes de escritas.
+- Revalidacao do estado do Jira.
+- Registro persistente antes da tentativa de envio.
+- Verificacao posterior das alteracoes.
+- Bloqueio de repeticao automatica apos resultado incerto.
+- Auditoria local.
+- Bloqueio das interfaces legadas de escrita generica.
+
+O metodo generico `JiraClient.post()` permanece bloqueado. As operacoes autorizadas utilizam transportes separados e limitados por tipo.
+
+A CLI historica `--execute` tambem permanece bloqueada.
+
+Os controles reduzem o risco de alteracoes acidentais, mas nao substituem seguranca do sistema operacional, gerenciamento de credenciais e revisao de permissoes.
+
+O Steering em `.kiro/steering/` fornece orientacoes ao agente. Para determinar o comportamento efetivo de escrita, consulte os controles Python e as permissoes MCP, inclusive quando documentos historicos de Steering estiverem desatualizados.
 
 ## Testes
 
-Execute a suíte:
+Execute:
 
 ```powershell
 .\.venv\Scripts\python.exe -m unittest discover -s tests -q
 ```
 
-A suíte cobre os copilotos e as validações locais, os contratos MCP e Steering, as simulações e os bloqueios de escrita. Os testes que exercitam transporte POST usam respostas HTTP simuladas; **eles não criam sprints reais no Jira**.
+Os testes automatizados utilizam mocks para validar os fluxos sem enviar POSTs reais ao Jira.
 
-No commit estável `61b901d`, a suíte versionada contém **61 testes**. Existem desenvolvimentos locais posteriores do agente `jiraia-readonly` que ainda não fazem parte dessa versão publicada.
+A execucao de testes nao constitui autorizacao para alteracoes de producao.
 
-## Estrutura principal
+A quantidade de testes pode mudar conforme o projeto evolui. Use o resultado da suite executada, nao numeros historicos fixos.
+
+## Estrutura
 
 ```text
 JIRAIA/
 ├── .kiro/
+│   ├── agents/
+│   │   └── jiraia.json
 │   └── steering/
-│       ├── product.md
-│       ├── tech.md
-│       ├── structure.md
-│       └── jira-safety.md
 ├── jiraia/
 │   ├── client.py
 │   ├── action_engine.py
 │   ├── executor.py
+│   ├── native_write.py
 │   ├── attempt_ledger.py
-│   ├── execution_cli.py
-│   └── real_execution.py
+│   └── execution_cli.py
 ├── scripts/
-│   └── mcp_jiraia.py
+│   ├── mcp_jiraia.py
+│   ├── mcp_jiraia_write.py
+│   └── mcp_jiraia_ops.py
 ├── tests/
 ├── .env.example
 ├── requirements.txt
 └── README.md
 ```
 
-A árvore acima destaca os componentes principais; o projeto contém outros módulos de planejamento, simulação e testes.
+A arvore destaca os componentes principais.
 
-## Segurança e limites
+## Validacao em Jira real
 
-- Use contas do Jira com as menores permissões necessárias.
-- Nunca versionar `.env`, tokens de API ou arquivos MCP privados.
-- Não confunda uma simulação de sucesso com uma operação realizada.
-- Não repita automaticamente uma tentativa de escrita cujo resultado seja incerto.
-- Revise permissões nativas do Kiro (`shell`, `write`, servidores externos) separadamente das ferramentas MCP.
-- Os bloqueios do JIRAIA reduzem operações **acidentais**; não são uma barreira contra código malicioso executado na mesma máquina com acesso a credenciais.
+Em 27 de outubro de 2026, o projeto realizou e verificou operacoes reais no board 1:
 
-## Situação do projeto
+- Criacao da `SCRUM Sprint 3`, ID 4.
+- Criacao da `Sprint 4`, ID 5.
+- Alocacao da `SCRUM-3` na sprint ID 5.
+- Consulta posterior confirmando a alocacao e o status da issue.
 
-**Versão estável:** consultas ao Jira por Kiro CLI V3, três ferramentas MCP e quatro documentos Steering; Action Engine experimental com escrita real desabilitada.
+Esses resultados pertencem ao ambiente de desenvolvimento configurado e nao implicam que outros ambientes estejam previamente preparados.
 
-**Próximo desenvolvimento previsto:** validar um agente Kiro dedicado de somente leitura e suas permissões antes de publicá-lo.
+## Licenca
 
-## Licença
-
-Verifique se o repositório possui um arquivo `LICENSE`. Na ausência de licença explícita, não presuma permissão para redistribuição ou uso de código por terceiros.
+Consulte o arquivo `LICENSE`, caso exista. Na ausencia de licenca explicita, nao presuma direitos de redistribuicao.
