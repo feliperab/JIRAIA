@@ -101,7 +101,7 @@ class _NoRedirect(HTTPRedirectHandler):
 
 def _send(jira, method, endpoint, payload):
     _require_site(jira)
-    if method not in ("POST", "PUT") or not endpoint.startswith("/rest/") or "?" in endpoint or "#" in endpoint:
+    if method not in ("POST", "PUT", "DELETE") or not endpoint.startswith("/rest/") or "?" in endpoint or "#" in endpoint:
         raise PermissionError("Metodo ou endpoint nao permitido")
     # Defense in depth: endpoints and methods are explicitly dispatched below.
     allowed = (
@@ -111,11 +111,14 @@ def _send(jira, method, endpoint, payload):
         or method == "POST" and bool(re.fullmatch(r"/rest/api/3/issue/SCRUM-[1-9][0-9]*/comment", endpoint))
         or method == "POST" and bool(re.fullmatch(r"/rest/agile/1\.0/sprint/[1-9][0-9]*/issue", endpoint))
         or method == "POST" and bool(re.fullmatch(r"/rest/agile/1\.0/sprint/[1-9][0-9]*", endpoint))
+        or method == "DELETE" and bool(re.fullmatch(r"/rest/api/3/issue/SCRUM-[1-9][0-9]*", endpoint))
     )
     if not allowed:
         raise PermissionError("Endpoint fora da allowlist")
+    if method == "DELETE" and (type(payload) is not dict or payload != {"deleteSubtasks": False}):
+        raise PermissionError("DELETE requer deleteSubtasks=False")
     req = Request("https://jiraia.atlassian.net" + endpoint,
-                  data=_canonical(payload).encode("utf-8"), method=method,
+                  data=None if method == "DELETE" else _canonical(payload).encode("utf-8"), method=method,
                   headers={"Authorization": "Basic " + jira.auth,
                            "Content-Type": "application/json", "Accept": "application/json"})
     try:
@@ -123,6 +126,10 @@ def _send(jira, method, endpoint, payload):
             if response.status not in (200, 201, 204):
                 raise RuntimeError("HTTP inesperado")
             raw = response.read()
+            if method == "DELETE":
+                if response.status != 204 or raw:
+                    raise RuntimeError("Resposta HTTP inesperada no DELETE")
+                return {"status_code": 204}
             return json.loads(raw) if raw else {}
     except HTTPError as e:
         raise RuntimeError(f"Jira HTTP {e.code}; nao repetir automaticamente") from None
@@ -480,6 +487,487 @@ async def jiraia_atualizar_sprint(sprint_id: int, ctx: Context, goal: str = "", 
         method="POST", endpoint=f"/rest/agile/1.0/sprint/{sprint_id}", payload=payload,
         snapshot=before, fresh=lambda: _sprint(jira, sprint_id, future=True), verify=verify)
 
+
+
+@mcp.tool()
+async def jiraia_criar_subtarefa(
+    resumo: str,
+    pai: str,
+    ctx: Context,
+    descricao: str = "",
+    tipo_subtarefa: str = "",
+) -> dict:
+    """Criar subtarefa no projeto SCRUM com autorizacao existente."""
+
+    jira = _client()
+    key = _issue_key(pai)
+    summary = _plain(resumo, 240)
+
+    parent = _issue(jira, key)
+    pf = parent["fields"]
+
+    if (pf.get("project") or {}).get("key") != "SCRUM":
+        raise ValueError("Pai fora do projeto SCRUM")
+
+    parent_type = pf.get("issuetype") or {}
+    level = parent_type.get("hierarchyLevel")
+
+    if (
+        parent_type.get("subtask") is True
+        or (level is not None and level != 0)
+        or parent_type.get("name", "").casefold()
+        in ("epic", "epico", "?pico")
+    ):
+        raise ValueError(
+            "O pai deve ser uma Story, Task ou issue de nivel 0"
+        )
+
+    project = jira.get("/rest/api/3/project/SCRUM")
+    types = project.get("issueTypes") or []
+
+    if not any(t.get("subtask") is True for t in types):
+        raw = jira.get(
+            "/rest/api/3/issuetype/project?"
+            + urlencode({"projectId": project["id"]})
+        )
+        types = (
+            raw.get("values", [])
+            if isinstance(raw, dict)
+            else raw
+        )
+
+    subtypes = [
+        t for t in types
+        if t.get("subtask") is True
+    ]
+
+    if tipo_subtarefa:
+        nome = _plain(tipo_subtarefa, 80)
+        subtypes = [
+            t for t in subtypes
+            if t.get("name", "").casefold() == nome.casefold()
+        ]
+
+    if len(subtypes) != 1:
+        return {
+            "status": "TIPO_SUBTAREFA_NAO_DETERMINADO",
+            "tipos_disponiveis": [
+                t.get("name")
+                for t in types
+                if t.get("subtask") is True
+            ],
+        }
+
+    type_id = subtypes[0]["id"]
+
+    payload = {
+        "fields": {
+            "project": {"key": "SCRUM"},
+            "issuetype": {"id": type_id},
+            "parent": {"key": key},
+            "summary": summary,
+        }
+    }
+
+    if descricao.strip():
+        payload["fields"]["description"] = _adf(
+            _plain(descricao)
+        )
+
+    def snapshot_parent():
+        atual = _issue(jira, key)
+        return {
+            "parent_updated": atual["fields"].get("updated"),
+            "type_id": type_id,
+        }
+
+    def verify(data):
+        created_key = data.get("key")
+
+        if (
+            not isinstance(created_key, str)
+            or ISSUE.fullmatch(created_key) is None
+        ):
+            return False
+
+        fields = _issue(jira, created_key)["fields"]
+
+        return (
+            fields.get("summary") == summary
+            and (fields.get("parent") or {}).get("key") == key
+            and (fields.get("issuetype") or {}).get("id")
+            == type_id
+        )
+
+    return await _write(
+        ctx,
+        jira,
+        kind="issue_create",
+        label=f"Criar subtarefa em {key}: {summary}",
+        method="POST",
+        endpoint="/rest/api/3/issue",
+        payload=payload,
+        snapshot=snapshot_parent(),
+        fresh=snapshot_parent,
+        verify=verify,
+    )
+
+
+def _crud_eh_tipo(issuetype, tipo):
+    import unicodedata
+
+    if not isinstance(issuetype, dict):
+        return False
+
+    original_name = issuetype.get("name")
+    if not isinstance(original_name, str):
+        return False
+
+    name = unicodedata.normalize(
+        "NFKD", original_name.strip()
+    ).casefold()
+
+    name = "".join(
+        char for char in name
+        if not unicodedata.combining(char)
+    )
+
+    name = " ".join(name.split())
+
+    raw_level = issuetype.get("hierarchyLevel")
+
+    if raw_level is None:
+        level = None
+    elif type(raw_level) is int:
+        level = raw_level
+    elif (
+        isinstance(raw_level, str)
+        and raw_level.strip() in ("-1", "0", "1")
+    ):
+        level = int(raw_level.strip())
+    else:
+        return False
+
+    subtask = issuetype.get("subtask") is True
+
+    if tipo == "epico":
+        return (
+            not subtask
+            and level in (None, 1)
+            and name in ("epic", "epico")
+        )
+
+    if tipo == "story":
+        return (
+            not subtask
+            and level in (None, 0)
+            and name in (
+                "story",
+                "user story",
+                "historia",
+                "historia de usuario",
+                "historia do usuario",
+            )
+        )
+
+    if tipo == "subtarefa":
+        return subtask or level == -1
+
+    return False
+
+
+def _crud_buscar_tipo_criacao(tipo):
+    jira = _client()
+    projeto = jira.get("/rest/api/3/project/SCRUM")
+    tipos = projeto.get("issueTypes") or []
+
+    if not tipos:
+        resultado = jira.get(
+            "/rest/api/3/issuetype/project?"
+            + urlencode({"projectId": projeto["id"]})
+        )
+        tipos = (
+            resultado.get("values", [])
+            if isinstance(resultado, dict)
+            else resultado
+        )
+
+    encontrados = [
+        t for t in tipos
+        if _crud_eh_tipo(t, tipo)
+    ]
+
+    if len(encontrados) != 1:
+        disponiveis = [t.get("name") for t in tipos]
+        raise ValueError(
+            f"Tipo {tipo} nao identificado de forma unica. "
+            f"Disponiveis: {disponiveis}"
+        )
+
+    return encontrados[0]["name"]
+
+
+def _crud_obter_issue(chave, tipo):
+    jira = _client()
+    key = _issue_key(chave)
+    issue = _issue(jira, key)
+    fields = issue["fields"]
+
+    if (fields.get("project") or {}).get("key") != "SCRUM":
+        raise ValueError("Issue fora do projeto SCRUM")
+
+    if not _crud_eh_tipo(fields.get("issuetype"), tipo):
+        raise ValueError(
+            f"{key} nao corresponde ao tipo {tipo}"
+        )
+
+    return key, issue
+
+
+def _crud_resumo_issue(issue):
+    fields = issue["fields"]
+    return {
+        "key": issue.get("key"),
+        "summary": fields.get("summary"),
+        "description": fields.get("description"),
+        "issuetype": (fields.get("issuetype") or {}).get("name"),
+        "status": (fields.get("status") or {}).get("name"),
+        "project": (fields.get("project") or {}).get("key"),
+        "parent": (fields.get("parent") or {}).get("key"),
+        "updated": fields.get("updated"),
+    }
+
+
+@mcp.tool()
+async def jiraia_criar_epico(
+    resumo: str,
+    ctx: Context,
+    descricao: str = "",
+) -> dict:
+    """Criar epico no projeto SCRUM com confirmacao humana."""
+    tipo = _crud_buscar_tipo_criacao("epico")
+    return await jiraia_criar_issue(
+        resumo, tipo, ctx, descricao
+    )
+
+
+@mcp.tool()
+def jiraia_obter_epico(chave: str) -> dict:
+    """Consultar epico validando seu tipo."""
+    _, issue = _crud_obter_issue(chave, "epico")
+    return _crud_resumo_issue(issue)
+
+
+@mcp.tool()
+async def jiraia_editar_epico(
+    chave: str,
+    ctx: Context,
+    resumo: str = "",
+    descricao: str = "",
+) -> dict:
+    """Editar resumo ou descricao de epico."""
+    key, _ = _crud_obter_issue(chave, "epico")
+    return await jiraia_editar_issue(
+        key, ctx, resumo, descricao
+    )
+
+
+@mcp.tool()
+async def jiraia_criar_story(
+    resumo: str,
+    ctx: Context,
+    descricao: str = "",
+) -> dict:
+    """Criar User Story no projeto SCRUM."""
+    tipo = _crud_buscar_tipo_criacao("story")
+    return await jiraia_criar_issue(
+        resumo, tipo, ctx, descricao
+    )
+
+
+@mcp.tool()
+def jiraia_obter_story(chave: str) -> dict:
+    """Consultar User Story validando seu tipo."""
+    _, issue = _crud_obter_issue(chave, "story")
+    return _crud_resumo_issue(issue)
+
+
+@mcp.tool()
+async def jiraia_editar_story(
+    chave: str,
+    ctx: Context,
+    resumo: str = "",
+    descricao: str = "",
+    pontos: float = -1,
+) -> dict:
+    """Editar resumo, descricao ou story points."""
+    key, _ = _crud_obter_issue(chave, "story")
+    return await jiraia_editar_issue(
+        key, ctx, resumo, descricao, pontos
+    )
+
+
+@mcp.tool()
+def jiraia_obter_subtarefa(chave: str) -> dict:
+    """Consultar subtarefa e sua issue pai."""
+    _, issue = _crud_obter_issue(chave, "subtarefa")
+    return _crud_resumo_issue(issue)
+
+
+@mcp.tool()
+async def jiraia_editar_subtarefa(
+    chave: str,
+    ctx: Context,
+    resumo: str = "",
+    descricao: str = "",
+) -> dict:
+    """Editar resumo ou descricao de subtarefa."""
+    key, _ = _crud_obter_issue(chave, "subtarefa")
+    return await jiraia_editar_issue(
+        key, ctx, resumo, descricao
+    )
+
+
+def _crud_exclusao_snapshot(jira, key, tipo):
+    """Validar alvo e dependencias antes de excluir."""
+    issue = _issue(jira, key)
+    fields = issue["fields"]
+
+    if not _crud_eh_tipo(fields.get("issuetype"), tipo):
+        raise PermissionError("Tipo de issue incorreto")
+
+    if (fields.get("project") or {}).get("key") != "SCRUM":
+        raise PermissionError("Projeto nao autorizado")
+
+    if not isinstance(fields.get("updated"), str) or not fields["updated"]:
+        raise ValueError("Versao da issue indisponivel")
+
+    if not isinstance(fields.get("summary"), str):
+        raise ValueError("Resumo da issue indisponivel")
+
+    if tipo != "subtarefa":
+        details = jira.get(
+            "/rest/api/3/issue/"
+            + quote(key, safe="")
+            + "?fields=subtasks"
+        )
+        subtasks = (details.get("fields") or {}).get("subtasks")
+
+        if not isinstance(subtasks, list):
+            raise ValueError("Consulta de subtarefas inconclusiva")
+
+        if subtasks:
+            raise PermissionError(
+                "Exclusao bloqueada: issue possui subtarefas"
+            )
+
+    if tipo == "epico":
+        jql = 'parent = "' + key + '"'
+        resultado = jira.get(
+            "/rest/api/3/search/jql?"
+            + urlencode({
+                "jql": jql,
+                "fields": "key",
+                "maxResults": 1,
+            })
+        )
+
+        if (
+            not isinstance(resultado, dict)
+            or not isinstance(resultado.get("issues"), list)
+        ):
+            raise ValueError("Consulta de filhos inconclusiva")
+
+        if resultado["issues"] or resultado.get("nextPageToken"):
+            raise PermissionError(
+                "Exclusao bloqueada: epico com filhos "
+                "ou consulta incompleta"
+            )
+
+    return {
+        "key": key,
+        "summary": fields["summary"],
+        "updated": fields["updated"],
+        "issuetype_id": (fields.get("issuetype") or {}).get("id"),
+        "parent": (fields.get("parent") or {}).get("key"),
+        "children_checked": True,
+    }
+
+
+async def _crud_excluir(chave: str, tipo: str, ctx: Context) -> dict:
+    jira = _client()
+    key = _issue_key(chave)
+    before = _crud_exclusao_snapshot(jira, key, tipo)
+
+    aviso = (
+        f"EXCLUSAO PERMANENTE de {tipo} {key}: "
+        f"{before['summary']}. "
+        "Operacao sem desfazer e sem exclusao em cascata."
+    )
+
+    # Primeira confirmacao humana
+    if not await _confirm(ctx, aviso):
+        return {"status": "CANCELADO_SEM_DELETE"}
+
+    endpoint = "/rest/api/3/issue/" + key
+    payload = {"deleteSubtasks": False}
+
+    def verify(result):
+        if (
+            type(result) is not dict
+            or result.get("status_code") != 204
+        ):
+            return False
+
+        try:
+            jira.get(endpoint)
+        except RuntimeError as exc:
+            if str(exc) == "Jira API retornou HTTP 404":
+                return True
+            raise
+
+        return False
+
+    # _write executa a segunda confirmacao e o dispatch auditado
+    return await _write(
+        ctx,
+        jira,
+        kind="issue_delete_" + tipo,
+        label=aviso + "\nCONFIRMACAO FINAL",
+        method="DELETE",
+        endpoint=endpoint,
+        payload=payload,
+        snapshot=before,
+        fresh=lambda: _crud_exclusao_snapshot(jira, key, tipo),
+        verify=verify,
+    )
+
+
+@mcp.tool()
+async def jiraia_excluir_epico(
+    chave: str,
+    ctx: Context,
+) -> dict:
+    """Excluir epico SCRUM sem filhos visiveis, com dupla confirmacao."""
+    return await _crud_excluir(chave, "epico", ctx)
+
+
+@mcp.tool()
+async def jiraia_excluir_story(
+    chave: str,
+    ctx: Context,
+) -> dict:
+    """Excluir Story SCRUM sem subtarefas, com dupla confirmacao."""
+    return await _crud_excluir(chave, "story", ctx)
+
+
+@mcp.tool()
+async def jiraia_excluir_subtarefa(
+    chave: str,
+    ctx: Context,
+) -> dict:
+    """Excluir subtarefa SCRUM com dupla confirmacao."""
+    return await _crud_excluir(chave, "subtarefa", ctx)
 
 if __name__ == "__main__":
     mcp.run(transport="stdio")
