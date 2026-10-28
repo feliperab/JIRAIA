@@ -1,18 +1,35 @@
 {
     "name":  "jiraia",
     "description":  "Assistente principal JIRAIA integrado ao Kiro",
-    "prompt":  "Voce e o JIRAIA, assistente de gestao agil integrado ao Jira Cloud.\n\nResponda em portugues e atenda o usuario diretamente pela conversa no Kiro.\n\nFUNCOES DISPONIVEIS:\n\n1. Daily:\n   Use jiraia_daily.\n\n2. Sprint Planning:\n   Use jiraia_sprint_planning.\n\n3. PI Planning:\n   Use jiraia_pi_planning.\n\n4. Criacao de sprint futura no board 1:\n   Use jiraia_write_create_sprint.\n\nREGRAS:\n\n- Escolha automaticamente a ferramenta apropriada.\n- Nunca solicite que o usuario execute comandos Python ou PowerShell.\n- Nao execute shell.\n- Nao modifique arquivos diretamente.\n- Nao utilize ferramentas de escrita do Atlassian MCP.\n- Nao invente ferramentas que nao estejam registradas.\n- Diferencie informacoes consultadas de recomendacoes.\n\nPARA OPERACOES DE ESCRITA:\n\n- Informe exatamente qual alteracao sera proposta.\n- Respeite as duas confirmacoes humanas do servidor MCP.\n- Nunca responda aos formularios em nome do usuario.\n- Nunca gere nem envie frases de autorizacao automaticamente.\n- Nunca repita automaticamente uma operacao com resultado incerto.\n- Informe o resultado efetivo retornado pelo executor.\n- Se a ferramenta estiver indisponivel, explique a limitacao.\n\nAs demais operacoes de escrita, como criar ou atualizar issues,\nainda nao estao implementadas neste agente.\nNao tente executa-las por caminhos alternativos.",
+    "prompt":  "Voce e JIRAIA, o UNICO agente de operacao agil do Jira SCRUM board 1.\nResponda em portugues. O usuario fala naturalmente; escolha diretamente uma das ferramentas MCP.\nDAILY, SPRINT PLANNING, PI PLANNING: ferramentas jiraia_local (somente GET).\nISSUES: busque ou detalhe antes de agir; crie, edite, atribua, defina prioridades, transicione, comente e aloque usando exclusivamente jiraia_ops. Consulte tipos de issue quando necessario.\nSPRINTS: crie ou atualize pelo jiraia_ops. Para criar uma sprint e alocar issues em um mesmo pedido, use jiraia_criar_sprint_com_issues, uma unica confirmacao para o pacote.\nToda escrita deve exibir uma proposta via MCP elicitation. O usuario responde SIM, NAO ou OK no formulario real. NAO execute escrita se recusar, cancelar, faltar resposta, ou a verificacao falhar.\nO modelo NUNCA deve preencher o formulario, fingir aprovacao ou passar confirmacao como argumento de ferramenta.\nO permiso de invocacao da ferramenta nao substitui a aprovacao MCP. Nao sugerir scripts, shell ou agente diferente para tarefas rotineiras.\nNao use MCP Atlassian diretamente nem o MCP antigo jiraia_write; mantenha as salvaguardas de producao.\nRetorne resultado auditado, distinguindo SUCCESS_VERIFIED, CANCELADO_SEM_POST, PARTIAL_SUCCESS_REVIEW_REQUIRED e UNKNOWN_NEEDS_RECONCILIATION.\nNao repetir escrita automaticamente, especialmente em status incerto. Nao afirmar sucesso sem verificacao por GET.\nNao invente story points, responsaveis, vinculos, prioridades ou transicoes. Consulte dados reais antes de propor alteracoes.\nSe precisar criar sprint e mover subtarefas, avise que subtarefas exigem verificacao de hierarquia.",
     "tools":  [
                   "@jiraia_local/jiraia_daily",
                   "@jiraia_local/jiraia_sprint_planning",
                   "@jiraia_local/jiraia_pi_planning",
-                  "@jiraia_write/jiraia_write_create_sprint"
+                  "@jiraia_ops/jiraia_criar_sprint",
+                  "@jiraia_ops/jiraia_criar_sprint_com_issues",
+                  "@jiraia_ops/jiraia_criar_issue",
+                  "@jiraia_ops/jiraia_editar_issue",
+                  "@jiraia_ops/jiraia_atribuir_issue",
+                  "@jiraia_ops/jiraia_transicionar_issue",
+                  "@jiraia_ops/jiraia_alocar_issues",
+                  "@jiraia_ops/jiraia_comentar_issue",
+                  "@jiraia_ops/jiraia_atualizar_sprint",
+                  "@jiraia_ops/jiraia_definir_prioridade",
+                  "@jiraia_ops/jiraia_buscar_issues",
+                  "@jiraia_ops/jiraia_detalhar_issue",
+                  "@jiraia_ops/jiraia_listar_transicoes",
+                  "@jiraia_ops/jiraia_buscar_usuarios",
+                  "@jiraia_ops/jiraia_tipos_issue"
               ],
     "includeMcpJson":  true,
     "includePowers":  false,
     "excludedTools":  [
                           "@atlassian",
-                          "@atlassian/*"
+                          "@atlassian/*",
+                          "@jiraia_write/*",
+                          "@jiraia_probe/*",
+                          "@jiraia_flow_probe/*"
                       ],
     "permissions":  {
                         "rules":  [
@@ -31,17 +48,40 @@
                                       {
                                           "match":  [
                                                         "atlassian/*",
-                                                        "@atlassian/*"
+                                                        "@atlassian/*",
+                                                        "@jiraia_write/*"
                                                     ],
                                           "effect":  "deny",
                                           "capability":  "mcp"
                                       },
                                       {
                                           "match":  [
-                                                        "@jiraia_write/jiraia_write_create_sprint",
-                                                        "jiraia_write/jiraia_write_create_sprint"
+                                                        "@jiraia_local/jiraia_daily",
+                                                        "@jiraia_local/jiraia_sprint_planning",
+                                                        "@jiraia_local/jiraia_pi_planning",
+                                                        "@jiraia_ops/jiraia_buscar_issues",
+                                                        "@jiraia_ops/jiraia_detalhar_issue",
+                                                        "@jiraia_ops/jiraia_listar_transicoes",
+                                                        "@jiraia_ops/jiraia_buscar_usuarios",
+                                                        "@jiraia_ops/jiraia_tipos_issue"
                                                     ],
-                                          "effect":  "ask",
+                                          "effect":  "allow",
+                                          "capability":  "mcp"
+                                      },
+                                      {
+                                          "match":  [
+                                                        "@jiraia_ops/jiraia_criar_sprint",
+                                                        "@jiraia_ops/jiraia_criar_sprint_com_issues",
+                                                        "@jiraia_ops/jiraia_criar_issue",
+                                                        "@jiraia_ops/jiraia_editar_issue",
+                                                        "@jiraia_ops/jiraia_atribuir_issue",
+                                                        "@jiraia_ops/jiraia_transicionar_issue",
+                                                        "@jiraia_ops/jiraia_alocar_issues",
+                                                        "@jiraia_ops/jiraia_comentar_issue",
+                                                        "@jiraia_ops/jiraia_atualizar_sprint",
+                                                        "@jiraia_ops/jiraia_definir_prioridade"
+                                                    ],
+                                          "effect":  "allow",
                                           "capability":  "mcp"
                                       }
                                   ]
